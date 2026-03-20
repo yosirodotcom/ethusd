@@ -267,7 +267,7 @@ def run_simulation(data_path, start_date_str, end_date_str):
                 # Helper for duration
                 def get_duration(start_idx, end_idx, times):
                     if start_idx == -1 or end_idx == -1: return "N/A"
-                    diff = times[end_idx] - times[start_idx]
+                    diff = pd.Timestamp(times[end_idx]) - pd.Timestamp(times[start_idx])
                     total_sec = int(diff.total_seconds())
                     h = total_sec // 3600
                     m = (total_sec % 3600) // 60
@@ -276,7 +276,7 @@ def run_simulation(data_path, start_date_str, end_date_str):
 
                 # Trade 1
                 if t1_ent != -1:
-                    e_time = tick_times[t1_ent]
+                    e_time = pd.Timestamp(tick_times[t1_ent])
                     trade_logs.append({
                         'Date Open': e_time.strftime('%Y-%m-%d'),
                         'Time Entry': e_time.strftime('%H:%M:%S'),
@@ -294,7 +294,7 @@ def run_simulation(data_path, start_date_str, end_date_str):
                 
                 # Trade 2 (Reversal)
                 if t2_ent != -1:
-                    e_time_2 = tick_times[t2_ent]
+                    e_time_2 = pd.Timestamp(tick_times[t2_ent])
                     trade_logs.append({
                         'Date Open': e_time_2.strftime('%Y-%m-%d'),
                         'Time Entry': e_time_2.strftime('%H:%M:%S'),
