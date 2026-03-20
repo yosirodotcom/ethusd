@@ -13,12 +13,12 @@ CONFIG = {
     # Trading Parameters
     "initial_balance": 100.0,
     "leverage": 400,
-    "risk_percent": 0.9,       # 10% risk per trade
+    "risk_percent": 0.10,       # 10% risk per trade
     "min_range_pips": 12.0,      # Minimum candle range to trade
     "spread_pips": 0.5,         # Broker spread
     
     # Time & Setup Parameters
-    "setup_hour": 5,            # Local hour of the setup candle (e.g., 5 for 05:xx)
+    "setup_hour": 22,            # Local hour of the setup candle (e.g., 5 for 05:xx)
     "setup_minute": 0,         # Local minute of the setup candle (e.g., 15 for xx:15)
     "timeframe_minutes": 15,    # Duration of the setup candle in minutes
     "wib_offset": 7,            # Local Timezone Offset (WIB is UTC+7)

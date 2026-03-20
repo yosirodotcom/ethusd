@@ -3,22 +3,25 @@ import numpy as np
 from numba import njit, prange
 import os
 import glob
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import time
 import gc
 
 # ==========================================
-# OPTIMIZER CONFIGURATION
+# VALIDATION TEST CONFIGURATION
 # ==========================================
 DATA_PATH = r"d:\repos\ethusd\data\raw"
-START_DATE = "2025-01-02"
-END_DATE = "2026-02-01"
+RESULTS_FILE = "optimization_results.csv"
+
+# You can change these dates to test the top 20 on a NEW date range 
+# (Out-of-Sample testing) or the same date range to verify.
+START_DATE = "2026-02-01"
+END_DATE = "2026-02-28"
+
 INITIAL_BALANCE = 100.0
 LEVERAGE = 400
 SPREAD_PIPS = 0.5
 WIB_OFFSET = 7
-
-MAX_DD_THRESHOLD = 50.0  
 # ==========================================
 
 @njit
@@ -123,8 +126,8 @@ def simulate_ticks(ticks, buy_stop, sell_stop, lot_size_in, tp_distance, sl_pric
     return total_profit, trades_count, 0, t1_mdd, t2_mdd
 
 @njit(parallel=True)
-def run_fast_grid_search_chunk(param_matrix, state_matrix, prices, timestamps, chunk_start_ts_ns, days_in_chunk, leverage, spread, wib_offset):
-    """Executes grid search iteratively. Maintains memory between chunks."""
+def run_fast_grid_search_chunk(param_matrix, state_matrix, prices, timestamps, chunk_start_ts_ns, days_in_chunk, leverage, spread):
+    """Executes the grid search iteratively across all CPU cores."""
     n_combinations = len(param_matrix)
     
     for i in prange(n_combinations):
@@ -143,8 +146,8 @@ def run_fast_grid_search_chunk(param_matrix, state_matrix, prices, timestamps, c
         total_wins = state_matrix[i, 3]
         
         for d in range(days_in_chunk):
-            day_start_ns = chunk_start_ts_ns + (d * 86400000000000) 
-            target_offset_ns = ((hour - wib_offset) * 3600 + minute * 60) * 1000000000
+            day_start_ns = chunk_start_ts_ns + (d * 86400000000000)
+            target_offset_ns = ((hour - 7) * 3600 + minute * 60) * 1000000000
             
             t_start = day_start_ns + target_offset_ns
             t_end_candle = t_start + (tf_mins * 60 * 1000000000)
@@ -195,7 +198,7 @@ def run_fast_grid_search_chunk(param_matrix, state_matrix, prices, timestamps, c
         state_matrix[i, 3] = total_wins
 
 def load_data_chunk_to_ram(start_utc, end_utc):
-    """Loads a small block of CSV data to avoid MemoryErrors"""
+    """Loads a block of CSV data into Fast Numpy arrays"""
     required_months = set()
     current = start_utc
     while current <= end_utc:
@@ -207,8 +210,8 @@ def load_data_chunk_to_ram(start_utc, end_utc):
     files = [f for f in sorted(all_files) if any(ym in f for ym in required_months)]
     
     df_list = []
-    start_us = int(start_utc.replace(tzinfo=timezone.utc).timestamp() * 1_000_000)
-    end_us = int(end_utc.replace(tzinfo=timezone.utc).timestamp() * 1_000_000)
+    start_us = int(start_utc.timestamp() * 1_000_000)
+    end_us = int(end_utc.timestamp() * 1_000_000)
     
     for f in files:
         try:
@@ -231,26 +234,38 @@ def load_data_chunk_to_ram(start_utc, end_utc):
         return prices_array, timestamps_array
     return None, None
 
-def generate_parameter_grid():
-    risks = [0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
-    ranges = list(range(5, 21)) 
-    timeframes = [15, 30, 60]
-    hours = list(range(24))
+def load_top_20_parameters():
+    """Reads optimization_results.csv and formats the top 20 for Numba execution"""
+    if not os.path.exists(RESULTS_FILE):
+        print(f"❌ Error: '{RESULTS_FILE}' not found. Run optimize.py first.")
+        return None, None
+        
+    df_opt = pd.read_csv(RESULTS_FILE).head(20)
     
-    param_list = []
-    for rsk in risks:
-        for rng in ranges:
-            for tf in timeframes:
-                for hr in hours:
-                    for mn in range(0, 60, tf):
-                        param_list.append([rsk, rng, tf, hr, mn])
-                        
-    return np.array(param_list, dtype=np.float64)
+    # Load parameters straight from the CSV (no string splitting needed)
+    risk_clean = df_opt['Risk'].astype(float)
+    hour_clean = df_opt['Hour'].astype(int)
+    min_clean = df_opt['Min'].astype(int)
+    
+    param_matrix = np.zeros((len(df_opt), 5), dtype=np.float64)
+    param_matrix[:, 0] = risk_clean
+    param_matrix[:, 1] = df_opt['Min Range']
+    param_matrix[:, 2] = df_opt['TF (m)']
+    param_matrix[:, 3] = hour_clean
+    param_matrix[:, 4] = min_clean
+    
+    return param_matrix, df_opt
 
 if __name__ == "__main__":
-    param_matrix = generate_parameter_grid()
+    print(f"📥 Loading Top 20 Parameters from {RESULTS_FILE}...")
+    param_matrix, display_df = load_top_20_parameters()
+    
+    if param_matrix is None:
+        exit()
+        
     total_combinations = len(param_matrix)
     
+    # State Matrix -> [equity, max_dd, total_trades, total_wins, mc_flag]
     state_matrix = np.zeros((total_combinations, 5), dtype=np.float64)
     state_matrix[:, 0] = INITIAL_BALANCE
     
@@ -258,11 +273,13 @@ if __name__ == "__main__":
     end_date_obj = datetime.strptime(END_DATE, "%Y-%m-%d")
     
     print("======================================================")
-    print(f"🚀 OPTIMIZING {total_combinations} COMBINATIONS (MEMORY SAFE MODE)")
+    print(f"🚀 FORWARD TESTING TOP {total_combinations} STRATEGIES")
+    print(f"📅 Testing Period: {START_DATE} to {END_DATE}")
     print("======================================================")
     
     start_time = time.time()
     
+    # Process the timeline in 30-day blocks
     current_chunk_start = start_date_obj
     while current_chunk_start <= end_date_obj:
         current_chunk_end = min(current_chunk_start + timedelta(days=29), end_date_obj)
@@ -276,12 +293,11 @@ if __name__ == "__main__":
         prices_array, timestamps_array = load_data_chunk_to_ram(chunk_start_utc, chunk_end_utc)
         
         if prices_array is not None:
-            # FIX: Ensure timestamp is strictly evaluated as UTC!
-            chunk_start_ts_ns = int(current_chunk_start.replace(tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+            chunk_start_ts_ns = int(current_chunk_start.timestamp() * 1000000000)
             
             run_fast_grid_search_chunk(
                 param_matrix, state_matrix, prices_array, timestamps_array, 
-                chunk_start_ts_ns, days_in_chunk, LEVERAGE, SPREAD_PIPS, WIB_OFFSET
+                chunk_start_ts_ns, days_in_chunk, LEVERAGE, SPREAD_PIPS
             )
             
             del prices_array, timestamps_array
@@ -292,45 +308,31 @@ if __name__ == "__main__":
         current_chunk_start = current_chunk_end + timedelta(days=1)
         
     end_time = time.time()
-    print(f"\n⚡ Optimization Finished in {round((end_time - start_time) / 60, 2)} minutes!")
+    print(f"\n⚡ Testing Finished in {round((end_time - start_time), 2)} seconds!")
     
-    results_df = pd.DataFrame(param_matrix, columns=['Risk', 'Min Range', 'TF (m)', 'Hour', 'Min'])
-    results_df['Net Profit ($)'] = state_matrix[:, 0] - INITIAL_BALANCE
+    # Attach calculated results back to the display DataFrame
+    display_df['TEST Net Profit ($)'] = (state_matrix[:, 0] - INITIAL_BALANCE).round(2)
     
     trades_mask = state_matrix[:, 2] > 0
     win_rates = np.zeros(total_combinations)
     win_rates[trades_mask] = (state_matrix[trades_mask, 3] / state_matrix[trades_mask, 2]) * 100.0
+    display_df['TEST Win Rate (%)'] = win_rates.round(2)
     
-    results_df['Win Rate (%)'] = win_rates
-    results_df['Max DD (%)'] = state_matrix[:, 1]
-    results_df['Total Trades'] = state_matrix[:, 2]
-    results_df['MC'] = state_matrix[:, 4]
+    display_df['TEST Max DD (%)'] = state_matrix[:, 1].round(2)
+    display_df['TEST Total Trades'] = state_matrix[:, 2].astype(int)
     
-    filtered_df = results_df[
-        (results_df['MC'] == 0.0) & 
-        (results_df['Max DD (%)'] <= MAX_DD_THRESHOLD) &
-        (results_df['Total Trades'] > 0)
-    ].copy()
+    # Handle rows that hit Margin Call
+    mc_mask = state_matrix[:, 4] == 1.0
+    display_df.loc[mc_mask, 'TEST Net Profit ($)'] = "MARGIN CALL"
     
-    if filtered_df.empty:
-        print("\n❌ No combinations survived the filters.")
-    else:
-        filtered_df = filtered_df.sort_values(by='Net Profit ($)', ascending=False).reset_index(drop=True)
-        filtered_df = filtered_df.drop(columns=['MC'])
-        
-        print(f"\n✅ Found {len(filtered_df)} valid combinations.")
-        print(f"🏆 TOP 20 BEST PARAMETERS (Max DD <= {MAX_DD_THRESHOLD}%):")
-        
-        display_df = filtered_df.head(20).copy()
-        display_df['Risk'] = display_df['Risk'].apply(lambda x: f"{x*100:.0f}%")
-        display_df['Hour:Min'] = display_df.apply(lambda row: f"{int(row['Hour']):02d}:{int(row['Min']):02d}", axis=1)
-        display_df['Net Profit ($)'] = display_df['Net Profit ($)'].round(2)
-        display_df['Win Rate (%)'] = display_df['Win Rate (%)'].round(2)
-        display_df['Max DD (%)'] = display_df['Max DD (%)'].round(2)
-        display_df['Total Trades'] = display_df['Total Trades'].astype(int)
-        
-        cols = ['Risk', 'Min Range', 'TF (m)', 'Hour:Min', 'Total Trades', 'Win Rate (%)', 'Max DD (%)', 'Net Profit ($)']
-        display_df = display_df[cols]
-        print(display_df.to_string(index=False))
-        
-        filtered_df.to_csv("optimization_results.csv", index=False)
+    # Create formatted strings for final console output
+    display_df['Hour:Min'] = display_df.apply(lambda row: f"{int(row['Hour']):02d}:{int(row['Min']):02d}", axis=1)
+    display_df['Risk'] = display_df['Risk'].apply(lambda x: f"{float(x)*100:.0f}%")
+    
+    # Keep only the identifying info and the newly tested results
+    cols_to_show = ['Risk', 'Min Range', 'TF (m)', 'Hour:Min', 'TEST Total Trades', 'TEST Win Rate (%)', 'TEST Max DD (%)', 'TEST Net Profit ($)']
+    final_report = display_df[cols_to_show]
+    
+    print("\n🏆 RESULTS FOR NEW DATE RANGE:")
+    print("=========================================================================================")
+    print(final_report.to_string(index=False))
