@@ -1,0 +1,47 @@
+# Data
+data/
+*.csv
+*.parquet
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+env.bak
+venv.bak
+
+# IDEs
+.vscode/
+.idea/
+
+# Reports and temporary files
+backtest_report.html
+equity_curve.png
+test_out.txt
+test_out_new.txt
+*.log
