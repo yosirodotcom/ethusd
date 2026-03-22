@@ -12,8 +12,8 @@ import gc
 # ==========================================
 DATA_PATH = r"d:\repos\ethusd\data\raw"
 
-TARGET_DATE = "2026-01-10"   # The ONE future day we are trying to predict
-MAX_DAYS_BACK = 30           # Max historical lookback (1 to 9 days back)
+TARGET_DATE = "2026-01-11"   # The ONE future day we are trying to predict
+MAX_DAYS_BACK = 27           # Max historical lookback (1 to 9 days back)
 TOP_N_PARAMS = 5             # Take Top 5 parameters from each lookback period
 
 INITIAL_BALANCE = 100.0

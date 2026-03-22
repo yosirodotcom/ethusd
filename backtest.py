@@ -26,11 +26,11 @@ CONFIG = {
     
     # Backtest Environment
     "data_path": r"d:\repos\ethusd\data\raw",
-    "start_date": "2026-02-01", 
-    "end_date": "2026-02-28",
+    "start_date": "2025-01-01", 
+    "end_date": "2025-12-31",
 
     # Display Settings
-    "show_visuals": True         # Set to False to disable popup charts
+    "show_visuals": False         # Set to False to disable popup charts
 }
 # ==========================================
 
